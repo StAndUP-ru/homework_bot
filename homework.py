@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 import time
 from datetime import datetime
 
@@ -28,7 +29,8 @@ HOMEWORK_STATUSES = {
 logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
     level=logging.INFO,
-    handlers=[logging.FileHandler('bot.log', 'w', 'utf-8')]
+    handlers=[logging.StreamHandler(sys.stdout)],
+    # handlers=[logging.FileHandler('bot.log', 'w', 'utf-8')]
 )
 logger = logging.getLogger(__name__)
 
