@@ -20,7 +20,7 @@ PRACTICUM_TOKEN = os.getenv('PR_TOKEN')
 TELEGRAM_TOKEN = os.getenv('TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('CHAT_ID')
 
-RETRY_TIME = 10
+RETRY_TIME = 300
 ENDPOINT = 'https://practicum.yandex.ru/api/user_api/homework_statuses/'
 HEADERS = {'Authorization': f'OAuth {PRACTICUM_TOKEN}'}
 
@@ -88,31 +88,27 @@ def check_response(response):
     """Проверяет ответ API на корректность."""
     logger.info('Проверка ответа API')
     try:
-        homeworks = response['homeworks'][0]
-        if isinstance(homeworks, dict):
-            return homeworks
+        homework = response['homeworks'][0]
+        if isinstance(homework, dict):
+            return homework
     except KeyError:
         logger.error('Отсутствие ожидаемых ключей в ответе API')
         raise KeyError('Отсутствие ожидаемых'
                        + 'ключей в ответе API')
-    except Exception as e:
-        logger.error(f'Ошибка при проверке ответа API на корректность: {e}')
-        raise ex.ApiResponseKeys(f'Ошибка при проверке ответа '
-                                 f'API на корректность: {e}')
 
 
 def parse_status(homework):
     """Извлекает и статус и название работы."""
     logger.info('Извлечение информации о работе')
-    homework_name = homework.get('homework_name')
-    homework_status = homework.get('status')
     try:
+        homework_name = homework.get('homework_name')
+        homework_status = homework.get('status')
         verdict = HOMEWORK_STATUSES[homework_status]
-    except KeyError:
-        massage = 'Не известный статус работы'
+        logger.info('Информация о работе получена')
+    except Exception:
+        massage = 'Информация о работе не получена'
         logger.error(massage)
         raise KeyError(massage)
-    logger.info('Получен статус работы')
     return f'Изменился статус проверки работы "{homework_name}". {verdict}'
 
 
