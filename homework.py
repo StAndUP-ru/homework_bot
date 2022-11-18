@@ -3,10 +3,14 @@ import os
 import sys
 import time
 from datetime import datetime
+from http import HTTPStatus
 
 import requests
 import telegram
 from dotenv import load_dotenv
+from requests.exceptions import RequestException
+from json.decoder import JSONDecodeError
+from telegram.error import NetworkError, TelegramError, TimedOut
 
 import exceptions as ex
 
@@ -16,7 +20,7 @@ PRACTICUM_TOKEN = os.getenv('PR_TOKEN')
 TELEGRAM_TOKEN = os.getenv('TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('CHAT_ID')
 
-RETRY_TIME = 600
+RETRY_TIME = 10
 ENDPOINT = 'https://practicum.yandex.ru/api/user_api/homework_statuses/'
 HEADERS = {'Authorization': f'OAuth {PRACTICUM_TOKEN}'}
 
@@ -43,8 +47,17 @@ def send_message(bot, message):
             text=message,
         )
         logger.info('Сообщение отправлено в чат')
-    except Exception as error:
-        logger.error(f'Сбой при отправке сообщения в чат: {error}')
+    except TimedOut:
+        logger.warning('Тайм-аут при отправке сообщения в чат')
+    except NetworkError:
+        logger.warning('Сетевая ошибка при доступе к серверу телеграм')
+        time.sleep(RETRY_TIME / 2)
+    except TelegramError as e:
+        if "Invalid server response" in str(e):
+            logger.error('Сервер выдал неверный ответ')
+            time.sleep(RETRY_TIME / 2)
+        else:
+            raise e
 
 
 def get_api_answer(current_timestamp):
@@ -58,51 +71,47 @@ def get_api_answer(current_timestamp):
             headers=HEADERS,
             params=params
         )
-        if response.status_code != 200:
+        if response.status_code != HTTPStatus.OK:
             raise ex.EndpointRequestException('Эндпоинт не доступен"')
-        response = response.json()
+        try:
+            response = response.json()
+        except JSONDecodeError:
+            logger.error('Ответ сервера не преобразовался в json')
         logger.info(f'Ответ API получен: {response}')
         return response
-    except Exception:
-        raise ex.EndpointRequestException('Ошибка при запросе к API')
+    except RequestException as e:
+        logger.error(e)
+        raise SystemExit(e)
 
 
 def check_response(response):
     """Проверяет ответ API на корректность."""
     logger.info('Проверка ответа API')
-    homeworks = response['homeworks'][0]
-    if isinstance(homeworks, dict):
-        return homeworks
-    elif not isinstance(homeworks, dict):
-        logger.error('Тип запроса не список')
-        raise TypeError('Тип запроса не список')
-    else:
+    try:
+        homeworks = response['homeworks'][0]
+        if isinstance(homeworks, dict):
+            return homeworks
+    except KeyError:
         logger.error('Отсутствие ожидаемых ключей в ответе API')
-        raise ex.ApiResponseKeys('Отсутствие ожидаемых'
-                                 + 'ключей в ответе API')
+        raise KeyError('Отсутствие ожидаемых'
+                       + 'ключей в ответе API')
+    except Exception as e:
+        logger.error(f'Ошибка при проверке ответа API на корректность: {e}')
+        raise ex.ApiResponseKeys(f'Ошибка при проверке ответа '
+                                 f'API на корректность: {e}')
 
 
 def parse_status(homework):
     """Извлекает и статус и название работы."""
     logger.info('Извлечение информации о работе')
-    try:
-        homework_name = homework.get('homework_name')
-    except Exception:
-        massage = 'Не указано название урока'
-        logger.error(massage)
-        raise KeyError(massage)
-    try:
-        homework_status = homework.get('status')
-    except Exception:
-        massage = 'Не указано статуса работы'
-        logger.error(massage)
-        raise KeyError(massage)
+    homework_name = homework.get('homework_name')
+    homework_status = homework.get('status')
     try:
         verdict = HOMEWORK_STATUSES[homework_status]
-    except Exception:
+    except KeyError:
         massage = 'Не известный статус работы'
         logger.error(massage)
-        raise ex.UnknownStatusException(massage)
+        raise KeyError(massage)
     logger.info('Получен статус работы')
     return f'Изменился статус проверки работы "{homework_name}". {verdict}'
 
@@ -130,17 +139,16 @@ def main():
         try:
             if check_tokens():
                 response = get_api_answer(current_timestamp)
-                if response.get('homeworks') == []:
+                if not response.get('homeworks'):
                     current_timestamp = int(time.time())
                     logger.info(f'Статус работы '
                                 f'c {last_timestamp} не изменился')
                     time.sleep(RETRY_TIME)
                     continue
-                if response.get('homeworks') != []:
-                    date_updated = response['homeworks'][0].get('date_updated')
-                    last_timestamp = datetime.strptime(
-                        date_updated, '%Y-%m-%dT%H:%M:%SZ'
-                    ).strftime('%Y-%m-%d %H:%M:%S')
+                date_updated = response['homeworks'][0].get('date_updated')
+                last_timestamp = datetime.strptime(
+                    date_updated, '%Y-%m-%dT%H:%M:%SZ'
+                ).strftime('%Y-%m-%d %H:%M:%S')
                 check = check_response(response)
                 message = parse_status(check)
                 send_message(bot, message)
