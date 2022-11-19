@@ -77,6 +77,7 @@ def get_api_answer(current_timestamp):
             response = response.json()
         except JSONDecodeError:
             logger.error('Ответ сервера не преобразовался в json')
+            raise JSONDecodeError('Ответ сервера не преобразовался в json')
         logger.info(f'Ответ API получен: {response}')
         return response
     except RequestException as e:
@@ -87,29 +88,39 @@ def get_api_answer(current_timestamp):
 def check_response(response):
     """Проверяет ответ API на корректность."""
     logger.info('Проверка ответа API')
-    try:
-        homework = response['homeworks'][0]
-        if isinstance(homework, dict):
-            return homework
-    except KeyError:
-        logger.error('Отсутствие ожидаемых ключей в ответе API')
-        raise KeyError('Отсутствие ожидаемых'
-                       + 'ключей в ответе API')
+    if not response:
+        message = 'Сервер вернул пустой массив данных'
+        logger.error(message)
+        raise Exception(message)
+    if not isinstance(response['homeworks'], list):
+        message = 'Неправильный тип данных в ответе API'
+        logger.error(message)
+        raise TypeError(message)
+    if not isinstance(response, dict):
+        message = 'Неправильный тип данных '
+        + 'полученных в ответе API'
+        logger.error(message)
+        raise TypeError(message)
+    else:
+        return response['homeworks'][0]
 
 
 def parse_status(homework):
-    """Извлекает и статус и название работы."""
+    """Извлекает из ответа API (словарь) статус и название работы."""
     logger.info('Извлечение информации о работе')
-    try:
+    if isinstance(homework, dict):
         homework_name = homework.get('homework_name')
         homework_status = homework.get('status')
-        verdict = HOMEWORK_STATUSES[homework_status]
+        try:
+            verdict = HOMEWORK_STATUSES[homework_status]
+        except KeyError:
+            massage = 'Неизвестный статус работы'
+            logger.error(massage)
+            raise KeyError(massage)
         logger.info('Информация о работе получена')
-    except Exception:
-        massage = 'Информация о работе не получена'
-        logger.error(massage)
-        raise KeyError(massage)
-    return f'Изменился статус проверки работы "{homework_name}". {verdict}'
+        return f'Изменился статус проверки работы "{homework_name}". {verdict}'
+    else:
+        raise KeyError('Невозможно извлечь информацию из ответа API')
 
 
 def check_tokens():
